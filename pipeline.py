@@ -9,7 +9,7 @@ from google.cloud import storage
 PROJECT_ID = 'my-veo-pipeline'
 LOCATION = 'us-central1'
 BUCKET_NAME = 'veo-output-123'
-LOCAL_FILENAME = "output.mp4"
+LOCAL_FILENAME = "trash_output.mp4"
 
 # Initialize Clients
 client = genai.Client(vertexai=True, project=PROJECT_ID, location=LOCATION)
