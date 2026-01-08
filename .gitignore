@@ -9,4 +9,4 @@ __pycache__/
 *.mp4
 
 # Logs
-cron_log.txt
+cron_log.txtnotes.md
