@@ -1,4 +1,12 @@
-venv/
-*.mp4
-__pycache__/
+# Secrets (CRITICAL)
 .env
+token.json
+client_secrets.json
+
+# Python
+venv/
+__pycache__/
+*.mp4
+
+# Logs
+cron_log.txt

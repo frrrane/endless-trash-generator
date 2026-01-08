@@ -1,79 +1,122 @@
-import time
 import os
-import uuid
+import time
+import pickle
+from dotenv import load_dotenv
 from google import genai
 from google.genai import types
-from google.cloud import storage
+from google_auth_oauthlib.flow import InstalledAppFlow
+from google.auth.transport.requests import Request
+import googleapiclient.discovery
+from googleapiclient.http import MediaFileUpload
 
-# --- CONFIG ---
-PROJECT_ID = 'my-veo-pipeline'
-LOCATION = 'us-central1'
-BUCKET_NAME = 'veo-output-123'
-LOCAL_FILENAME = "trash_output.mp4"
+# --- 1. CONFIGURATION & SECRETS ---
+load_dotenv()
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+CLIENT_SECRETS_FILE = "client_secrets.json"
+TOKEN_FILE = "token.json"
+YOUTUBE_SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]
 
-# Initialize Clients
-client = genai.Client(vertexai=True, project=PROJECT_ID, location=LOCATION)
-storage_client = storage.Client(project=PROJECT_ID)
+def get_authenticated_service():
+    """Bypasses 2FA by using a saved token.json file."""
+    creds = None
+    if os.path.exists(TOKEN_FILE):
+        with open(TOKEN_FILE, 'rb') as token:
+            creds = pickle.load(token)
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+        else:
+            flow = InstalledAppFlow.from_client_secrets_file(CLIENT_SECRETS_FILE, YOUTUBE_SCOPES)
+            creds = flow.run_local_server(port=0)
+        with open(TOKEN_FILE, 'wb') as token:
+            pickle.dump(creds, token)
+    return googleapiclient.discovery.build("youtube", "v3", credentials=creds)
 
-def run_video_pipeline(prompt):
-    """
-    Generates a video, saves it to GCS, and downloads a local copy.
-    Returns: (gcs_uri, local_path)
-    """
-    # Create a unique ID for this specific generation
-    unique_id = str(uuid.uuid4())[:8]
-    blob_name = f"videos/gen_{unique_id}.mp4"
-    gcs_uri = f"gs://{BUCKET_NAME}/{blob_name}"
-
-    print(f"🚀 Starting Pipeline: {prompt}")
-    print(f"🎬 Video ID: {unique_id}")
-    
-    # 1. Trigger Generation
-    operation = client.models.generate_videos(
-        model="veo-3.1-fast-generate-001",
-        prompt=prompt,
-        config=types.GenerateVideosConfig(
-            fps=24,
-            aspect_ratio="16:9",
-            output_gcs_uri=gcs_uri
+def generate_random_prompt():
+    """Uses Gemini Text (high quota) to invent a weird video idea."""
+    print("🧠 Brainstorming a new idea...")
+    try:
+        client = genai.Client(api_key=GEMINI_API_KEY)
+        response = client.models.generate_content(
+            model="gemini-2.0-flash",
+            contents="Write a 1-sentence cinematic prompt for a weird, surreal, or funny AI video. No robots making sandwiches—be more creative."
         )
-    )
+        return response.text.strip()
+    except Exception as e:
+        print(f"⚠️ Brainstorming failed, using fallback prompt. Error: {e}")
+        return "A surreal chrome creature wandering through a neon digital wasteland"
 
-    # 2. Polling for Completion
-    while not operation.done:
-        print("⏳ Rendering on Google Cloud...")
-        time.sleep(20)
-        operation = client.operations.get(operation)
+def generate_video_with_veo(prompt):
+    """Uses Veo 3.1 to turn the prompt into a video file."""
+    if not GEMINI_API_KEY:
+        print("❌ ERROR: No API Key found in .env file!")
+        return None
 
-    # 3. Handle Result
-    if operation.result:
-        print(f"✅ Generation complete! URI: {gcs_uri}")
+    client = genai.Client(api_key=GEMINI_API_KEY)
+    print(f"🎬 Veo 3.1 is imagining: {prompt}")
+    
+    try:
+        operation = client.models.generate_videos(
+            model="veo-3.1-generate-preview",
+            prompt=prompt,
+            config=types.GenerateVideosConfig(aspect_ratio="16:9", duration_seconds=8)
+        )
+
+        while not operation.done:
+            print("⏳ Rendering... (Check back in 1-2 mins)")
+            time.sleep(20)
+            operation = client.operations.get(operation)
+
+        timestamp = time.strftime("%Y%m%d-%H%M%S")
+        filename = f"trash_{timestamp}.mp4"
         
-        # Download logic with a smart retry
-        try:
-            bucket = storage_client.bucket(BUCKET_NAME)
-            blob = bucket.blob(blob_name)
-            
-            # Wait a moment for GCS to index the new file
-            time.sleep(5) 
-            blob.download_to_filename(LOCAL_FILENAME)
-            
-            print(f"🎉 SUCCESS! Video saved locally as: {LOCAL_FILENAME}")
-            return gcs_uri, LOCAL_FILENAME
-        except Exception as e:
-            print(f"⚠️ Video is in bucket, but local download failed: {e}")
-            return gcs_uri, None
-    else:
-        print(f"❌ Generation failed: {operation.error}")
-        return None, None
+        video = operation.result.generated_videos[0]
+        client.files.download(file=video.video)
+        video.video.save(filename)
+        print(f"✅ Saved: {filename}")
+        return filename
 
+    except Exception as e:
+        if "429" in str(e):
+            print("\n❌ QUOTA EXHAUSTED: Try again after midnight Pacific Time.")
+        else:
+            print(f"\n❌ ERROR: {e}")
+        return None
+
+def upload_to_youtube(file_path, title):
+    """Uploads the video to your channel as 'Private'."""
+    youtube = get_authenticated_service()
+    print(f"🚀 Uploading to YouTube: {title}")
+    
+    body = {
+        'snippet': {
+            'title': title,
+            'description': 'Generated by the Endless Trash Pipeline',
+            'categoryId': '22'
+        },
+        'status': {'privacyStatus': 'private'}
+    }
+
+    request = youtube.videos().insert(
+        part="snippet,status",
+        body=body,
+        media_body=MediaFileUpload(file_path, chunksize=-1, resumable=True)
+    )
+    response = request.execute()
+    print(f"📺 SUCCESS! Video ID: {response['id']}")
+
+# --- MAIN EXECUTION ---
 if __name__ == "__main__":
-    my_prompt = "A high-speed FPV drone shot through a neon-lit canyon, 4k, hyper-realistic"
+    print(f"\n--- STARTING PIPELINE: {time.strftime('%H:%M:%S')} ---")
     
-    # This is how you'll capture the values for your YouTube API later
-    cloud_uri, local_file = run_video_pipeline(my_prompt)
+    # Step 1: Get a random idea
+    prompt = generate_random_prompt()
     
-    if cloud_uri:
-        print(f"\n--- READY FOR YOUTUBE ---")
-        print(f"Cloud Path: {cloud_uri}")
-        print(f"Local Path: {local_file}")
+    # Step 2: Try to make the video
+    video_file = generate_video_with_veo(prompt)
+    
+    # Step 3: Upload if it worked
+    if video_file:
+        upload_to_youtube(video_file, f"Endless Trash: {prompt[:50]}...")
+    else:
+        print("⏭️ Pipeline stopped. No video to upload.")
