@@ -1,27 +1,37 @@
-# 🤖 Endless Trash Generator
+# Endless Trash Generator 🗑️✨
 
-An automated AI-video pipeline that dreams up surreal concepts and publishes them to YouTube. This project uses **Google Veo 3.1** for video generation and **Gemini 2.0 Flash** for creative prompt engineering.
+An absurd AI-powered daily trash video factory.  
+Generates completely deranged, surreal video prompts using mad-libs chaos, current-ish trending topics, Gemini enhancement, and spoken narration via TTS.
 
-## 🚀 How it Works
-1. **Brainstorming:** The script uses Gemini 2.0 to generate a unique, surreal, or funny video prompt.
-2. **Generation:** The prompt is sent to the Veo 3.1 model to create an 8-second cinematic video.
-3. **Publishing:** The resulting MP4 is automatically uploaded to a YouTube channel as a Private video.
-4. **Automation:** A Linux Cron job triggers the entire pipeline daily.
+Currently outputs:
+- Wild one-sentence prompts (printed + saved as TTS audio)
+- Ready for Veo video generation (disabled by default to save quota)
 
-## 🛠️ Tech Stack
-- **Language:** Python 3.11+
-- **AI Models:** Google GenAI (Veo 3.1 & Gemini 2.0 Flash)
-- **APIs:** YouTube Data API v3
-- **Automation:** Linux Crontab
+## Current Output Style (example)
 
-## 📦 Setup Instructions
+> A terminally online pineapple pulsating with neon veins and clad in skin-tight, bio-engineered skinny jeans speedruns main character syndrome in a parallel dimension LinkedIn Premium Lounge oozing glitching, hyper-saturated Marcus Rashford memes, fueled by a Quietly Unhinged energy drink brewed from tears of discarded TikTok e-girls after the fish-eye lens apocalypse, all while desperately begging a sentient AI to end its suffering as chromatic aberration tears reality itself apart.
 
-### 1. Prerequisites
-- A Google Cloud Project with the YouTube Data API enabled.
-- A Gemini API Key from [Google AI Studio](https://aistudio.google.com/).
-- Python virtual environment (`venv`).
+## Features
 
-### 2. Configuration
-Create a `.env` file in the root directory:
-```text
-GEMINI_API_KEY="your_api_key_here"
+- Mad-libs style prompt templates with cursed word pools
+- Gemini 2.0 Flash chaos boost for maximum brainrot
+- Spoken narration via gTTS (English, adjustable speed)
+- Static fallback trending topics (live scraping blocked/deprecated in 2026)
+- YouTube upload pipeline (private, disabled until video gen enabled)
+- Easy to run daily via cron
+
+## Requirements
+
+- Python 3.10+
+- Google Gemini API key (with Veo access for video – preview model)
+
+```bash
+pip install -U \
+  google-genai \
+  python-dotenv \
+  google-auth-oauthlib \
+  google-api-python-client \
+  beautifulsoup4 \
+  requests \
+  gtts \
+  moviepy
