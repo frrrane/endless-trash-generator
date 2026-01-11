@@ -2,6 +2,7 @@ import os
 import time
 import pickle
 from dotenv import load_dotenv
+
 from google import genai
 from google.genai import types
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -9,92 +10,124 @@ from google.auth.transport.requests import Request
 import googleapiclient.discovery
 from googleapiclient.http import MediaFileUpload
 
-# --- 1. CONFIGURATION & SECRETS ---
+# ── PROMPT TEMPLATES IMPORT ──────────────────────────────────────────────────
+from prompt_templates import generate_wild_prompt, get_current_buzzwords
+
+# ── CONFIGURATION & SECRETS ──────────────────────────────────────────────────
 load_dotenv()
+
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 CLIENT_SECRETS_FILE = "client_secrets.json"
 TOKEN_FILE = "token.json"
 YOUTUBE_SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]
 
+
 def get_authenticated_service():
-    """Bypasses 2FA by using a saved token.json file."""
+    """Get YouTube service with saved token or new OAuth flow"""
     creds = None
     if os.path.exists(TOKEN_FILE):
         with open(TOKEN_FILE, 'rb') as token:
             creds = pickle.load(token)
+
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())
         else:
-            flow = InstalledAppFlow.from_client_secrets_file(CLIENT_SECRETS_FILE, YOUTUBE_SCOPES)
+            flow = InstalledAppFlow.from_client_secrets_file(
+                CLIENT_SECRETS_FILE, YOUTUBE_SCOPES)
             creds = flow.run_local_server(port=0)
         with open(TOKEN_FILE, 'wb') as token:
             pickle.dump(creds, token)
+
     return googleapiclient.discovery.build("youtube", "v3", credentials=creds)
 
-def generate_random_prompt():
-    """Uses Gemini Text (high quota) to invent a weird video idea."""
-    print("🧠 Brainstorming a new idea...")
-    try:
-        client = genai.Client(api_key=GEMINI_API_KEY)
-        response = client.models.generate_content(
-            model="gemini-2.0-flash",
-            contents="Write a 1-sentence cinematic prompt for a weird, surreal, or funny AI video. No robots making sandwiches—be more creative."
-        )
-        return response.text.strip()
-    except Exception as e:
-        print(f"⚠️ Brainstorming failed, using fallback prompt. Error: {e}")
-        return "A surreal chrome creature wandering through a neon digital wasteland"
+
+def generate_random_prompt(use_gemini_boost=True):
+    """Generate chaotic trash prompt with current X trends + optional Gemini chaos"""
+    print("🧠 Generating wild trash prompt...")
+
+    # Refresh trending topics each run
+    get_current_buzzwords()  # updates global BUZZWORDS in prompt_templates
+
+    client = None
+    if use_gemini_boost:
+        if not GEMINI_API_KEY:
+            print("⚠️  No GEMINI_API_KEY found in .env — skipping Gemini boost")
+        else:
+            client = genai.Client(api_key=GEMINI_API_KEY)
+
+    prompt = generate_wild_prompt(
+        use_gemini_boost=use_gemini_boost,
+        gemini_client=client
+    )
+
+    print("\n" + "═" * 80)
+    print("WILD TRASH PROMPT:")
+    print(prompt)
+    print("═" * 80 + "\n")
+
+    return prompt
+
 
 def generate_video_with_veo(prompt):
-    """Uses Veo 3.1 to turn the prompt into a video file."""
-    if not GEMINI_API_KEY:
-        print("❌ ERROR: No API Key found in .env file!")
-        return None
+    """Veo video generation — CURRENTLY DISABLED for development"""
+    print("⏳ Veo generation is DISABLED in code (uncomment when ready to use quota)")
+    return None
 
-    client = genai.Client(api_key=GEMINI_API_KEY)
-    print(f"🎬 Veo 3.1 is imagining: {prompt}")
-    
-    try:
-        operation = client.models.generate_videos(
-            model="veo-3.1-generate-preview",
-            prompt=prompt,
-            config=types.GenerateVideosConfig(aspect_ratio="16:9", duration_seconds=8)
-        )
+    # ── Uncomment this block when you want to generate real videos ───────────
+    # if not GEMINI_API_KEY:
+    #     print("❌ ERROR: No GEMINI_API_KEY in .env!")
+    #     return None
+    #
+    # client = genai.Client(api_key=GEMINI_API_KEY)
+    # print(f"🎬 Generating video with Veo: {prompt}")
+    #
+    # try:
+    #     operation = client.models.generate_videos(
+    #         model="veo-3.1-generate-preview",
+    #         prompt=prompt,
+    #         config=types.GenerateVideosConfig(
+    #             aspect_ratio="16:9",
+    #             duration_seconds=8
+    #         )
+    #     )
+    #
+    #     while not operation.done:
+    #         print("⏳ Rendering in progress... (usually 1-3 minutes)")
+    #         time.sleep(20)
+    #         operation = client.operations.get(operation)
+    #
+    #     timestamp = time.strftime("%Y%m%d-%H%M%S")
+    #     filename = f"trash_{timestamp}.mp4"
+    #
+    #     video = operation.result.generated_videos[0]
+    #     client.files.download(file=video.video)
+    #     video.video.save(filename)
+    #
+    #     print(f"✓ Video saved: {filename}")
+    #     return filename
+    #
+    # except Exception as e:
+    #     print(f"❌ Veo generation failed: {e}")
+    #     if "429" in str(e):
+    #         print("   → Quota likely exhausted (wait until next day Pacific Time)")
+    #     return None
 
-        while not operation.done:
-            print("⏳ Rendering... (Check back in 1-2 mins)")
-            time.sleep(20)
-            operation = client.operations.get(operation)
-
-        timestamp = time.strftime("%Y%m%d-%H%M%S")
-        filename = f"trash_{timestamp}.mp4"
-        
-        video = operation.result.generated_videos[0]
-        client.files.download(file=video.video)
-        video.video.save(filename)
-        print(f"✅ Saved: {filename}")
-        return filename
-
-    except Exception as e:
-        if "429" in str(e):
-            print("\n❌ QUOTA EXHAUSTED: Try again after midnight Pacific Time.")
-        else:
-            print(f"\n❌ ERROR: {e}")
-        return None
 
 def upload_to_youtube(file_path, title):
-    """Uploads the video to your channel as 'Private'."""
+    """Upload video to YouTube as Private"""
     youtube = get_authenticated_service()
     print(f"🚀 Uploading to YouTube: {title}")
-    
+
     body = {
         'snippet': {
             'title': title,
-            'description': 'Generated by the Endless Trash Pipeline',
-            'categoryId': '22'
+            'description': 'Generated by Endless Trash Generator\n#AI #Surreal #TrashArt',
+            'categoryId': '22'  # People & Blogs
         },
-        'status': {'privacyStatus': 'private'}
+        'status': {
+            'privacyStatus': 'private'
+        }
     }
 
     request = youtube.videos().insert(
@@ -102,21 +135,27 @@ def upload_to_youtube(file_path, title):
         body=body,
         media_body=MediaFileUpload(file_path, chunksize=-1, resumable=True)
     )
-    response = request.execute()
-    print(f"📺 SUCCESS! Video ID: {response['id']}")
 
-# --- MAIN EXECUTION ---
+    response = request.execute()
+    print(f"✓ Upload complete! Video ID: {response['id']}")
+
+
+# ── MAIN ─────────────────────────────────────────────────────────────────────
+
 if __name__ == "__main__":
-    print(f"\n--- STARTING PIPELINE: {time.strftime('%H:%M:%S')} ---")
-    
-    # Step 1: Get a random idea
-    prompt = generate_random_prompt()
-    
-    # Step 2: Try to make the video
-    video_file = generate_video_with_veo(prompt)
-    
-    # Step 3: Upload if it worked
+    print(f"\n=== ENDLESS TRASH GENERATOR — CHAOS MODE ===")
+    print(f"     {time.strftime('%Y-%m-%d %H:%M:%S')} — Ljubljana\n")
+
+    # 1. Generate and show crazy prompt (main testing point)
+    prompt = generate_random_prompt(use_gemini_boost=True)
+
+    # 2. Video generation (disabled by default)
+    print("→ Skipping video generation (disabled in code)\n")
+    video_file = None  # generate_video_with_veo(prompt)   ← uncomment when ready
+
+    # 3. Upload only if we actually have a video
     if video_file:
-        upload_to_youtube(video_file, f"Endless Trash: {prompt[:50]}...")
+        short_title = f"Endless Trash: {prompt[:55]}{'...' if len(prompt) > 55 else ''}"
+        upload_to_youtube(video_file, short_title)
     else:
-        print("⏭️ Pipeline stopped. No video to upload.")
+        print("Pipeline test complete ✓ (no video generated)")
