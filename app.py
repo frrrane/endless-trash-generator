@@ -1,4 +1,5 @@
 import streamlit as st
+import sys
 import subprocess
 import os
 import requests
@@ -63,7 +64,7 @@ with col1:
     st.header("CMD_EXECUTIONS")
     if st.button("RUN_PIPELINE.EXE"):
         st.write(">> INITIALIZING...")
-        result = subprocess.run(["venv/bin/python3", "pipeline.py"], capture_output=True, text=True)
+        result = subprocess.run([sys.executable, "pipeline.py"], capture_output=True, text=True)
         st.code(result.stdout)
 
 with col2:
